@@ -6,6 +6,13 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 
+interface AppUser {
+    id: string;
+    username: string;
+    password: string;
+    role: 'superadmin' | 'admin' | 'kiosk';
+}
+
 export default function SettingsPage() {
     const { role } = useAuth();
     const router = useRouter();
@@ -20,28 +27,32 @@ export default function SettingsPage() {
     const [lateThreshold, setLateThreshold] = useState('15');
     const [selectedLang, setSelectedLang] = useState(language);
 
-    // Work Hours Settings (NEW)
+    // Work Hours Settings
     const [workStartTime, setWorkStartTime] = useState('07:00');
     const [workEndTime, setWorkEndTime] = useState('15:00');
     const [breakStartTime, setBreakStartTime] = useState('11:00');
     const [breakEndTime, setBreakEndTime] = useState('12:00');
 
-    // Kiosk Rules (NEW)
+    // Kiosk Rules
     const [allowLateCheckin, setAllowLateCheckin] = useState(true);
     const [maxLateMinutes, setMaxLateMinutes] = useState('60');
     const [allowEarlyCheckout, setAllowEarlyCheckout] = useState(false);
     const [allowEarlyBreakout, setAllowEarlyBreakout] = useState(true);
+
+    // User Management (Superadmin Only)
+    const [users, setUsers] = useState<AppUser[]>([]);
+    const [showUserModal, setShowUserModal] = useState(false);
+    const [editingUser, setEditingUser] = useState<AppUser | null>(null);
+    const [newUsername, setNewUsername] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [newRole, setNewRole] = useState<'superadmin' | 'admin' | 'kiosk'>('admin');
 
     const timezones = [
         'Asia/Jakarta', 'Asia/Jayapura', 'Asia/Makassar', 'Asia/Singapore',
         'Asia/Bangkok', 'Australia/Sydney', 'Europe/London', 'America/New_York', 'UTC'
     ];
 
-    useEffect(() => {
-        if (role !== 'admin') { /* router.push('/'); */ }
-    }, [role, router]);
-
-    useEffect(() => { fetchSettings(); }, []);
+    useEffect(() => { fetchSettings(); if (role === 'superadmin') fetchUsers(); }, [role]);
 
     const fetchSettings = async () => {
         const { data } = await supabase.from('app_settings').select('*');
@@ -62,6 +73,11 @@ export default function SettingsPage() {
             });
         }
         setLoading(false);
+    };
+
+    const fetchUsers = async () => {
+        const { data } = await supabase.from('app_users').select('*').order('role');
+        if (data) setUsers(data);
     };
 
     const handleSave = async () => {
@@ -95,6 +111,41 @@ export default function SettingsPage() {
         setSaving(false);
     };
 
+    // User Management Functions
+    const openAddUser = () => {
+        setEditingUser(null);
+        setNewUsername('');
+        setNewPassword('');
+        setNewRole('admin');
+        setShowUserModal(true);
+    };
+
+    const openEditUser = (user: AppUser) => {
+        setEditingUser(user);
+        setNewUsername(user.username);
+        setNewPassword(user.password);
+        setNewRole(user.role);
+        setShowUserModal(true);
+    };
+
+    const saveUser = async () => {
+        if (!newUsername || !newPassword) return alert('Username and password are required');
+
+        if (editingUser) {
+            await supabase.from('app_users').update({ username: newUsername, password: newPassword, role: newRole }).eq('id', editingUser.id);
+        } else {
+            await supabase.from('app_users').insert([{ username: newUsername, password: newPassword, role: newRole }]);
+        }
+        setShowUserModal(false);
+        fetchUsers();
+    };
+
+    const deleteUser = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this user?')) return;
+        await supabase.from('app_users').delete().eq('id', id);
+        fetchUsers();
+    };
+
     if (loading) return <div className="p-8">Loading settings...</div>;
 
     return (
@@ -104,6 +155,41 @@ export default function SettingsPage() {
                     <button onClick={() => router.push('/admin/dashboard')} className="text-gray-500 hover:text-gray-800 mb-2">&larr; {t('dashboard')}</button>
                     <h1 className="text-3xl font-bold text-gray-800">{t('app_settings')}</h1>
                 </header>
+
+                {/* USER MANAGEMENT - SUPERADMIN ONLY */}
+                {role === 'superadmin' && (
+                    <div className="bg-white rounded-lg shadow-md p-6 space-y-4 border-2 border-teal-500">
+                        <div className="flex justify-between items-center border-b pb-2">
+                            <h2 className="text-xl font-bold text-teal-800">👥 User Management</h2>
+                            <button onClick={openAddUser} className="bg-teal-600 text-white px-4 py-2 rounded hover:bg-teal-700 font-bold">+ Add User</button>
+                        </div>
+                        <table className="w-full text-left">
+                            <thead>
+                                <tr className="text-gray-500 text-sm uppercase">
+                                    <th className="p-2">Username</th>
+                                    <th className="p-2">Role</th>
+                                    <th className="p-2 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {users.map(u => (
+                                    <tr key={u.id} className="border-t hover:bg-gray-50">
+                                        <td className="p-2 font-bold text-gray-800">{u.username}</td>
+                                        <td className="p-2">
+                                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${u.role === 'superadmin' ? 'bg-purple-100 text-purple-800' : u.role === 'admin' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
+                                                {u.role.toUpperCase()}
+                                            </span>
+                                        </td>
+                                        <td className="p-2 text-right space-x-2">
+                                            <button onClick={() => openEditUser(u)} className="text-blue-600 hover:underline">Edit</button>
+                                            <button onClick={() => deleteUser(u.id)} className="text-red-600 hover:underline">Delete</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
 
                 {/* General Settings */}
                 <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
@@ -215,6 +301,37 @@ export default function SettingsPage() {
                     )}
                 </div>
             </div>
+
+            {/* USER MODAL */}
+            {showUserModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+                        <h3 className="text-xl font-bold mb-4">{editingUser ? 'Edit User' : 'Add New User'}</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Username</label>
+                                <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="w-full border p-2 rounded text-black" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Password</label>
+                                <input type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border p-2 rounded text-black" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Role</label>
+                                <select value={newRole} onChange={(e) => setNewRole(e.target.value as any)} className="w-full border p-2 rounded text-black">
+                                    <option value="superadmin">Superadmin</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="kiosk">Kiosk</option>
+                                </select>
+                            </div>
+                            <div className="flex justify-end space-x-3 pt-4">
+                                <button onClick={() => setShowUserModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
+                                <button onClick={saveUser} className="px-4 py-2 bg-teal-600 text-white hover:bg-teal-700 rounded font-bold">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

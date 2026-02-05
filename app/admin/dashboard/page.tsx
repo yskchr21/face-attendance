@@ -6,30 +6,34 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '@/context/LanguageContext';
 
+interface Employee {
+    id: string;
+    name: string;
+}
+
+interface DailyStatus {
+    employee: Employee;
+    check_in?: { time: string; status: string };
+    break_out?: { time: string; status: string };
+    break_in?: { time: string; status: string };
+    check_out?: { time: string; status: string };
+}
+
 export default function AdminDashboard() {
     const { role, logout } = useAuth();
     const router = useRouter();
     const { t } = useLanguage();
     const [stats, setStats] = useState({ totalEmployees: 0, todayAttendance: 0, lateCount: 0 });
-    const [logs, setLogs] = useState<any[]>([]);
-
-    useEffect(() => {
-        // Simple protection
-        if (role !== 'admin') {
-            // router.push('/'); // Commented out for now to avoid redirects during dev/testing if context isn't fully set
-        }
-    }, [role, router]);
+    const [dailyStatus, setDailyStatus] = useState<DailyStatus[]>([]);
 
     useEffect(() => {
         fetchStats();
-        fetchLogs();
+        fetchDailyAttendance();
     }, []);
 
     const fetchStats = async () => {
-        // 1. Total Employees
         const { count: employeeCount } = await supabase.from('employees').select('*', { count: 'exact', head: true });
 
-        // 2. Today's Attendance - Count UNIQUE employees with check_in (not break_in/break_out)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
@@ -39,10 +43,8 @@ export default function AdminDashboard() {
             .eq('log_type', 'check_in')
             .gte('timestamp', today.toISOString());
 
-        // Get unique employee IDs
         const uniqueEmployees = new Set(checkInLogs?.map(l => l.employee_id) || []);
 
-        // 3. Late Check-ins today
         const { count: lateCount } = await supabase
             .from('attendance_logs')
             .select('*', { count: 'exact', head: true })
@@ -57,14 +59,43 @@ export default function AdminDashboard() {
         });
     };
 
-    const fetchLogs = async () => {
-        const { data, error } = await supabase
-            .from('attendance_logs')
-            .select('*, employees(name)') // Join with employees table
-            .order('timestamp', { ascending: false })
-            .limit(20);
+    const fetchDailyAttendance = async () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
 
-        if (data) setLogs(data);
+        const { data: employees } = await supabase.from('employees').select('id, name').eq('is_active', true).order('name');
+        if (!employees) return;
+
+        const { data: logs } = await supabase
+            .from('attendance_logs')
+            .select('employee_id, log_type, status, timestamp')
+            .gte('timestamp', today.toISOString())
+            .lt('timestamp', tomorrow.toISOString());
+
+        const logMap = new Map<string, DailyStatus>();
+        employees.forEach(emp => {
+            logMap.set(emp.id, { employee: emp });
+        });
+
+        logs?.forEach(log => {
+            const status = logMap.get(log.employee_id);
+            if (!status) return;
+            const time = new Date(log.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            if (log.log_type === 'check_in') status.check_in = { time, status: log.status };
+            if (log.log_type === 'break_out') status.break_out = { time, status: log.status };
+            if (log.log_type === 'break_in') status.break_in = { time, status: log.status };
+            if (log.log_type === 'check_out') status.check_out = { time, status: log.status };
+        });
+
+        setDailyStatus(Array.from(logMap.values()));
+    };
+
+    const getStatusBadge = (log?: { time: string; status: string }) => {
+        if (!log) return <span className="text-gray-300">-</span>;
+        const color = log.status === 'late' ? 'bg-red-100 text-red-800' : log.status === 'early_departure' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
+        return <span className={`px-2 py-1 rounded text-xs font-bold ${color}`}>{log.time}</span>;
     };
 
     return (
@@ -138,46 +169,36 @@ export default function AdminDashboard() {
                     </div>
                 </div>
 
-                {/* Recent Logs Table */}
+                {/* Daily Attendance Table */}
                 <div className="bg-white rounded-lg shadow-md overflow-hidden">
-                    <div className="p-6 border-b border-gray-200">
-                        <h2 className="text-xl font-semibold text-gray-800">{t('recent_activity')}</h2>
+                    <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+                        <h2 className="text-xl font-semibold text-gray-800">📋 Status Absensi Hari Ini</h2>
+                        <span className="text-sm text-gray-500">{new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="bg-gray-50 text-black text-sm uppercase tracking-wider">
-                                    <th className="p-4 border-b">{t('time')}</th>
-                                    <th className="p-4 border-b">{t('employee_name')}</th>
-                                    <th className="p-4 border-b">{t('status')}</th>
+                                    <th className="p-4 border-b">Karyawan</th>
+                                    <th className="p-4 border-b text-center">Check In</th>
+                                    <th className="p-4 border-b text-center">Break Out</th>
+                                    <th className="p-4 border-b text-center">Break In</th>
+                                    <th className="p-4 border-b text-center">Check Out</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                                {logs.length === 0 ? (
+                                {dailyStatus.length === 0 ? (
                                     <tr>
-                                        <td colSpan={3} className="p-4 text-center text-black">No records found today</td>
+                                        <td colSpan={5} className="p-4 text-center text-gray-500">Tidak ada karyawan aktif</td>
                                     </tr>
                                 ) : (
-                                    logs.map((log) => (
-                                        <tr key={log.id} className="hover:bg-gray-50">
-                                            <td className="p-4 text-black">
-                                                {new Date(log.timestamp).toLocaleTimeString()}
-                                            </td>
-                                            <td className="p-4 font-medium text-black">
-                                                {log.employees?.name || 'Unknown'}
-                                            </td>
-                                            <td className="p-4">
-                                                <span className={`px-2 py-1 rounded text-xs font-semibold ${log.status === 'late'
-                                                    ? 'bg-red-100 text-red-800'
-                                                    : log.status === 'early_departure'
-                                                        ? 'bg-blue-100 text-blue-800'
-                                                        : log.status === 'overtime'
-                                                            ? 'bg-purple-100 text-purple-800'
-                                                            : 'bg-green-100 text-green-800'
-                                                    }`}>
-                                                    {t(log.status) || log.status?.toUpperCase() || t('on_time')}
-                                                </span>
-                                            </td>
+                                    dailyStatus.map((s) => (
+                                        <tr key={s.employee.id} className="hover:bg-gray-50">
+                                            <td className="p-4 font-medium text-gray-800">{s.employee.name}</td>
+                                            <td className="p-4 text-center">{getStatusBadge(s.check_in)}</td>
+                                            <td className="p-4 text-center">{getStatusBadge(s.break_out)}</td>
+                                            <td className="p-4 text-center">{getStatusBadge(s.break_in)}</td>
+                                            <td className="p-4 text-center">{getStatusBadge(s.check_out)}</td>
                                         </tr>
                                     ))
                                 )}
