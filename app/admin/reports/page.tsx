@@ -17,6 +17,8 @@ interface ReportRow {
     lateCount: number;
     totalFines: number;
     totalBonuses: number;
+    overtimeHours: number;
+    overtimePay: number;
     estimatedSalary: number;
 }
 
@@ -25,13 +27,10 @@ export default function MonthlyReportPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [reportData, setReportData] = useState<ReportRow[]>([]);
-
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
 
     useEffect(() => {
-        if (role !== 'admin') {
-            // router.push('/'); 
-        }
+        // if (role !== 'admin') { router.push('/'); }
     }, [role, router]);
 
     useEffect(() => {
@@ -49,37 +48,102 @@ export default function MonthlyReportPage() {
         const year = parseInt(selectedMonth.split('-')[0]);
         const month = parseInt(selectedMonth.split('-')[1]);
         const startDate = new Date(year, month - 1, 1).toISOString();
-        const endDate = new Date(year, month, 0).toISOString(); // Last day of month
+        const endDate = new Date(year, month, 0, 23, 59, 59).toISOString();
 
         // 3. Get all logs for this month
         const { data: logs } = await supabase
             .from('attendance_logs')
             .select('*')
             .gte('timestamp', startDate)
-            .lte('timestamp', endDate);
+            .lte('timestamp', endDate)
+            .order('timestamp', { ascending: true });
+
+        // Helper to parse time string "HH:MM:SS" to minutes from midnight
+        const parseTimeToMinutes = (timeStr: string) => {
+            if (!timeStr) return 0;
+            const [h, m] = timeStr.split(':').map(Number);
+            return h * 60 + m;
+        };
 
         // 4. Calculate Data
         const report: ReportRow[] = employees.map(emp => {
             const empLogs = logs?.filter(log => log.employee_id === emp.id) || [];
 
-            // Count unique days present (check_in count is good approx)
-            const checkIns = empLogs.filter(l => l.log_type === 'check_in');
-            const daysPresent = checkIns.length;
+            // Group logs by Date (YYYY-MM-DD)
+            const logsByDate: { [key: string]: any[] } = {};
+            empLogs.forEach(log => {
+                const dateKey = new Date(log.timestamp).toLocaleDateString('en-CA'); // YYYY-MM-DD
+                if (!logsByDate[dateKey]) logsByDate[dateKey] = [];
+                logsByDate[dateKey].push(log);
+            });
 
-            const lateCount = empLogs.filter(l => l.status === 'late').length;
+            let daysPresent = 0;
+            let totalOvertimeHours = 0;
+            let totalOvertimePay = 0;
+            let lateCount = 0;
+            let totalFines = 0;
+            let totalBonuses = 0;
 
-            // Sum Fines and Bonuses
-            const totalFines = empLogs.reduce((sum, l) => sum + (l.fine_amount || 0), 0);
-            const totalBonuses = empLogs.reduce((sum, l) => sum + (l.bonus_amount || 0), 0);
+            // Iterate through each worked day
+            Object.keys(logsByDate).forEach(date => {
+                const dayLogs = logsByDate[date];
 
-            // Calculate Salary
-            let salary = 0;
+                // Identify key events
+                const checkIn = dayLogs.find(l => l.log_type === 'check_in');
+                const checkOut = dayLogs.find(l => l.log_type === 'check_out');
+                const breakIn = dayLogs.find(l => l.log_type === 'break_in');
+                const breakOut = dayLogs.find(l => l.log_type === 'break_out');
+
+                if (checkIn) {
+                    daysPresent++;
+                    if (checkIn.status === 'late') lateCount++;
+                    totalFines += (checkIn.fine_amount || 0);
+                    // Check fines/bonuses on other logs if any (rare but possible)
+                }
+
+                totalBonuses += dayLogs.reduce((sum, l) => sum + (l.bonus_amount || 0), 0);
+
+                // Calculate Net Work Minutes
+                if (checkIn && checkOut) {
+                    const checkInTime = new Date(checkIn.timestamp).getTime();
+                    const checkOutTime = new Date(checkOut.timestamp).getTime();
+                    let workDurationMs = checkOutTime - checkInTime;
+
+                    if (breakIn && breakOut) {
+                        const breakInTime = new Date(breakIn.timestamp).getTime();
+                        const breakOutTime = new Date(breakOut.timestamp).getTime();
+                        const breakDurationMs = breakOutTime - breakInTime;
+                        workDurationMs -= breakDurationMs;
+                    }
+
+                    const netWorkMinutes = workDurationMs / (1000 * 60);
+
+                    // Calculate Scheduled Duration
+                    const startMins = parseTimeToMinutes(emp.work_start_time);
+                    const endMins = parseTimeToMinutes(emp.work_end_time);
+                    // Handle shift crossing midnight if needed (simple assumption: same day)
+                    let scheduledMinutes = endMins - startMins;
+                    if (scheduledMinutes < 0) scheduledMinutes += 24 * 60; // Handle overnight shift simply
+
+                    // Overtime Calculation
+                    if (netWorkMinutes > scheduledMinutes) {
+                        const otMinutes = netWorkMinutes - scheduledMinutes;
+                        const otHours = otMinutes / 60;
+                        totalOvertimeHours += otHours;
+                        totalOvertimePay += otHours * (emp.overtime_hourly_rate || 0);
+                    }
+                }
+            });
+
+            // Calculate Base Salary
+            let baseSalary = 0;
             if (emp.wage_type === 'monthly') {
-                salary = (emp.base_wage || 0) + totalBonuses - totalFines;
+                baseSalary = emp.base_wage || 0;
             } else {
-                // Daily
-                salary = ((emp.base_wage || 0) * daysPresent) + totalBonuses - totalFines;
+                baseSalary = (emp.base_wage || 0) * daysPresent;
             }
+
+            const estimatedSalary = baseSalary + totalBonuses + totalOvertimePay - totalFines;
 
             return {
                 employeeId: emp.id,
@@ -90,7 +154,9 @@ export default function MonthlyReportPage() {
                 lateCount,
                 totalFines,
                 totalBonuses,
-                estimatedSalary: salary
+                overtimeHours: parseFloat(totalOvertimeHours.toFixed(2)),
+                overtimePay: Math.round(totalOvertimePay),
+                estimatedSalary: Math.round(estimatedSalary)
             };
         });
 
@@ -99,9 +165,8 @@ export default function MonthlyReportPage() {
     };
 
     const downloadPDF = () => {
-        const doc = new jsPDF();
+        const doc = new jsPDF('l', 'mm', 'a4'); // Landscape for more columns
 
-        // Month Formatting
         const date = new Date(selectedMonth + '-01');
         const formattedMonth = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
@@ -114,15 +179,20 @@ export default function MonthlyReportPage() {
             `Rp ${row.baseWage.toLocaleString()}`,
             row.daysPresent,
             row.lateCount,
+            `${row.overtimeHours} hrs`,
+            `Rp ${row.overtimePay.toLocaleString()}`,
             `Rp ${row.totalFines.toLocaleString()}`,
             `Rp ${row.totalBonuses.toLocaleString()}`,
             `Rp ${row.estimatedSalary.toLocaleString()}`
         ]);
 
         autoTable(doc, {
-            head: [['Employee', 'Type', 'Base', 'Days', 'Late', 'Fines', 'Bonus', 'Total Pay']],
+            head: [['Employe', 'Type', 'Base', 'Days', 'Late', 'OT Hrs', 'OT Pay', 'Fines', 'Bonus', 'Total Pay']],
             body: tableData,
             startY: 30,
+            theme: 'grid',
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [22, 160, 133] }
         });
 
         doc.save(`payroll_report_${selectedMonth}.pdf`);
@@ -132,7 +202,7 @@ export default function MonthlyReportPage() {
 
     return (
         <div className="min-h-screen bg-gray-100 p-8">
-            <div className="max-w-7xl mx-auto">
+            <div className="max-w-[100rem] mx-auto">
                 <header className="flex justify-between items-center mb-8">
                     <div className="flex items-center space-x-4">
                         <button onClick={() => router.push('/admin/dashboard')} className="text-gray-500 hover:text-gray-800">&larr; Dashboard</button>
@@ -157,50 +227,45 @@ export default function MonthlyReportPage() {
                     </div>
                 </header>
 
-                <div className="bg-white rounded-lg shadow-md overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="bg-gray-50 text-black text-xs uppercase tracking-wider">
-                                    <th className="p-4 border-b">Employee</th>
-                                    <th className="p-4 border-b">Wage Type</th>
-                                    <th className="p-4 border-b">Base Wage</th>
-                                    <th className="p-4 border-b">Days Present</th>
-                                    <th className="p-4 border-b">Lates</th>
-                                    <th className="p-4 border-b text-red-600">Fines</th>
-                                    <th className="p-4 border-b text-green-600">Bonuses</th>
-                                    <th className="p-4 border-b font-bold bg-blue-50 text-blue-900">Est. Take Home</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                                {loading ? (
-                                    <tr><td colSpan={8} className="p-8 text-center text-black">Loading Data...</td></tr>
-                                ) : reportData.length === 0 ? (
-                                    <tr><td colSpan={8} className="p-8 text-center text-gray-500">No data found for this month.</td></tr>
-                                ) : (
-                                    reportData.map((row) => (
-                                        <tr key={row.employeeId} className="hover:bg-gray-50 text-sm">
-                                            <td className="p-4 font-bold text-gray-900">
-                                                <Link
-                                                    href={`/admin/reports/${row.employeeId}?month=${selectedMonth}`}
-                                                    className="text-blue-600 hover:underline"
-                                                >
-                                                    {row.name}
-                                                </Link>
-                                            </td>
-                                            <td className="p-4 capitalize text-black">{row.wageType}</td>
-                                            <td className="p-4 text-black">Rp {row.baseWage.toLocaleString()}</td>
-                                            <td className="p-4 font-medium text-black">{row.daysPresent} Days</td>
-                                            <td className="p-4 text-orange-600 font-medium">{row.lateCount}</td>
-                                            <td className="p-4 text-red-600">Rp {row.totalFines.toLocaleString()}</td>
-                                            <td className="p-4 text-green-600">Rp {row.totalBonuses.toLocaleString()}</td>
-                                            <td className="p-4 font-bold text-blue-900 bg-blue-50">Rp {row.estimatedSalary.toLocaleString()}</td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                <div className="bg-white rounded-lg shadow-md overflow-x-auto">
+                    <table className="w-full text-left border-collapse min-w-max">
+                        <thead>
+                            <tr className="bg-teal-700 text-white text-xs uppercase tracking-wider">
+                                <th className="p-4 border-b">Employee</th>
+                                <th className="p-4 border-b">Wage Type</th>
+                                <th className="p-4 border-b">Base Wage</th>
+                                <th className="p-4 border-b">Days Worked</th>
+                                <th className="p-4 border-b">OT Hours</th>
+                                <th className="p-4 border-b">OT Pay</th>
+                                <th className="p-4 border-b">Lates</th>
+                                <th className="p-4 border-b text-red-100">Fines</th>
+                                <th className="p-4 border-b text-green-100">Bonuses</th>
+                                <th className="p-4 border-b font-bold bg-teal-800">Total Take Home</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                            {loading ? (
+                                <tr><td colSpan={10} className="p-8 text-center text-black">Loading detailed payroll data...</td></tr>
+                            ) : reportData.length === 0 ? (
+                                <tr><td colSpan={10} className="p-8 text-center text-gray-500">No data found for this month.</td></tr>
+                            ) : (
+                                reportData.map((row) => (
+                                    <tr key={row.employeeId} className="hover:bg-gray-50 text-sm font-medium">
+                                        <td className="p-4 text-gray-900">{row.name}</td>
+                                        <td className="p-4 capitalize text-gray-600">{row.wageType}</td>
+                                        <td className="p-4 text-gray-600">Rp {row.baseWage.toLocaleString()}</td>
+                                        <td className="p-4 text-gray-800">{row.daysPresent}</td>
+                                        <td className="p-4 text-purple-600 font-bold">{row.overtimeHours} h</td>
+                                        <td className="p-4 text-purple-600 font-bold">Rp {row.overtimePay.toLocaleString()}</td>
+                                        <td className="p-4 text-orange-600">{row.lateCount}</td>
+                                        <td className="p-4 text-red-600">Rp {row.totalFines.toLocaleString()}</td>
+                                        <td className="p-4 text-green-600">Rp {row.totalBonuses.toLocaleString()}</td>
+                                        <td className="p-4 font-bold text-white bg-teal-600">Rp {row.estimatedSalary.toLocaleString()}</td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>

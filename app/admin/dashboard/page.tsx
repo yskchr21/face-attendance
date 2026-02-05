@@ -29,24 +29,30 @@ export default function AdminDashboard() {
         // 1. Total Employees
         const { count: employeeCount } = await supabase.from('employees').select('*', { count: 'exact', head: true });
 
-        // 2. Today's Attendance
+        // 2. Today's Attendance - Count UNIQUE employees with check_in (not break_in/break_out)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const { count: attendanceCount } = await supabase
+
+        const { data: checkInLogs } = await supabase
             .from('attendance_logs')
-            .select('*', { count: 'exact', head: true })
+            .select('employee_id')
+            .eq('log_type', 'check_in')
             .gte('timestamp', today.toISOString());
+
+        // Get unique employee IDs
+        const uniqueEmployees = new Set(checkInLogs?.map(l => l.employee_id) || []);
 
         // 3. Late Check-ins today
         const { count: lateCount } = await supabase
             .from('attendance_logs')
             .select('*', { count: 'exact', head: true })
             .gte('timestamp', today.toISOString())
-            .eq('status', 'late');
+            .eq('status', 'late')
+            .eq('log_type', 'check_in');
 
         setStats({
             totalEmployees: employeeCount || 0,
-            todayAttendance: attendanceCount || 0,
+            todayAttendance: uniqueEmployees.size,
             lateCount: lateCount || 0
         });
     };
@@ -67,12 +73,22 @@ export default function AdminDashboard() {
                 <header className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-800">{t('dashboard')}</h1>
                     <div className="space-x-4">
-                        <button
-                            onClick={() => router.push('/admin/reports')}
-                            className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700"
-                        >
-                            {t('payroll_report')}
-                        </button>
+                        {role === 'superadmin' && (
+                            <>
+                                <button
+                                    onClick={() => router.push('/admin/finance')}
+                                    className="bg-teal-600 text-white px-4 py-2 rounded hover:bg-teal-700 font-bold border-2 border-white shadow-md"
+                                >
+                                    💰 {t('finance_dashboard')}
+                                </button>
+                                <button
+                                    onClick={() => router.push('/admin/reports')}
+                                    className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700"
+                                >
+                                    {t('payroll_report')}
+                                </button>
+                            </>
+                        )}
                         <button
                             onClick={() => router.push('/admin/attendance')}
                             className="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700"

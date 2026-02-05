@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
-import * as faceapi from 'face-api.js';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
@@ -9,98 +8,57 @@ import { useRouter } from 'next/navigation';
 export default function RegisterEmployeePage() {
     const { role } = useAuth();
     const router = useRouter();
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const [modelsLoaded, setModelsLoaded] = useState(false);
 
-    // Form State
+    // Form State (NO face scan - just data entry)
     const [name, setName] = useState('');
-    const [whatsapp, setWhatsapp] = useState(''); // New State
-    const [startTime, setStartTime] = useState('09:00');
-    const [endTime, setEndTime] = useState('18:00'); // New End Time
-    const [pin, setPin] = useState('123456'); // New PIN
+    const [jobPosition, setJobPosition] = useState('');
+    const [whatsapp, setWhatsapp] = useState('');
+    const [startTime, setStartTime] = useState('07:00');
+    const [endTime, setEndTime] = useState('15:00');
+    const [pin, setPin] = useState('123456');
     const [wageType, setWageType] = useState('monthly');
     const [baseWage, setBaseWage] = useState('');
 
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
 
-    // Protect Route
     useEffect(() => {
-        if (role !== 'admin') {
-            // router.push('/'); 
-        }
+        if (role !== 'admin') { /* router.push('/'); */ }
     }, [role, router]);
 
-    useEffect(() => {
-        const loadModels = async () => {
-            const MODEL_URL = '/models';
-            await Promise.all([
-                faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-                faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-            ]);
-            setModelsLoaded(true);
-        };
-        loadModels();
-    }, []);
-
-    const startVideo = () => {
-        navigator.mediaDevices
-            .getUserMedia({ video: { facingMode: 'user' } })
-            .then((stream) => {
-                if (videoRef.current) {
-                    videoRef.current.srcObject = stream;
-                }
-            })
-            .catch((err) => console.error(err));
-    };
-
-    useEffect(() => {
-        if (modelsLoaded) {
-            startVideo();
-        }
-    }, [modelsLoaded]);
-
     const handleRegister = async () => {
-        if (!videoRef.current || !name) return;
+        if (!name) {
+            setMessage('Please enter employee name');
+            return;
+        }
         setLoading(true);
         setMessage('');
 
         try {
-            const detections = await faceapi
-                .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-                .withFaceLandmarks()
-                .withFaceDescriptor();
+            // Insert employee WITHOUT face_descriptor (will be added later via Scan Face)
+            const { error } = await supabase
+                .from('employees')
+                .insert([{
+                    name,
+                    job_position: jobPosition,
+                    whatsapp_number: whatsapp,
+                    work_start_time: startTime + ':00',
+                    work_end_time: endTime + ':00',
+                    pin: pin,
+                    wage_type: wageType,
+                    base_wage: parseInt(baseWage) || 0,
+                    face_descriptor: [] // Empty - will be scanned later
+                }]);
 
-            if (detections) {
-                const descriptor = Array.from(detections.descriptor);
-
-                // Insert into 'employees' table
-                const { error } = await supabase
-                    .from('employees')
-                    .insert([{
-                        name,
-                        whatsapp_number: whatsapp,
-                        face_descriptor: descriptor,
-                        work_start_time: startTime + ':00',
-                        work_end_time: endTime + ':00',
-                        pin: pin,
-                        wage_type: wageType,
-                        base_wage: parseInt(baseWage) || 0
-                    }]);
-
-                if (error) throw error;
-                setMessage('Employee Registered Successfully!');
-                setName('');
-                setWhatsapp('');
-                setBaseWage('');
-                // Reset defaults
-                setStartTime('09:00');
-                setEndTime('18:00');
-                setPin('123456');
-            } else {
-                setMessage('No face detected. Please try again.');
-            }
+            if (error) throw error;
+            setMessage('✅ Employee Registered! Go to Employee Management to scan face.');
+            setName('');
+            setJobPosition('');
+            setWhatsapp('');
+            setBaseWage('');
+            setStartTime('07:00');
+            setEndTime('15:00');
+            setPin('123456');
         } catch (error: any) {
             console.error(error);
             setMessage(`Error: ${error.message || 'Something went wrong'}`);
@@ -111,38 +69,34 @@ export default function RegisterEmployeePage() {
 
     return (
         <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
-            <div className="w-full max-w-4xl bg-white rounded-lg shadow-xl overflow-hidden flex flex-col md:flex-row">
-
-                {/* Camera Section */}
-                <div className="w-full md:w-1/2 bg-black relative aspect-video md:aspect-auto">
-                    <video
-                        ref={videoRef}
-                        autoPlay
-                        muted
-                        className="w-full h-full object-cover"
-                    />
-                    {!modelsLoaded && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 text-white">
-                            Loading AI Models...
-                        </div>
-                    )}
-                </div>
-
-                {/* Form Section */}
-                <div className="w-full md:w-1/2 p-8">
-                    <h1 className="text-2xl font-bold mb-6 text-gray-800">Register New Employee</h1>
+            <div className="w-full max-w-2xl bg-white rounded-lg shadow-xl overflow-hidden">
+                <div className="p-8">
                     <button onClick={() => router.back()} className="text-sm text-gray-500 hover:underline mb-4">&larr; Back to Dashboard</button>
+                    <h1 className="text-2xl font-bold mb-6 text-gray-800">Register New Employee</h1>
+                    <p className="text-gray-500 text-sm mb-6">📸 Face scan will be done in Employee Management after registration.</p>
 
                     <div className="space-y-4">
-                        <div>
-                            <label className="block text-gray-700 text-sm font-bold mb-2">Employee Name</label>
-                            <input
-                                type="text"
-                                placeholder="Full Name"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                className="w-full p-3 rounded border border-gray-300 focus:border-blue-500 focus:outline-none text-black"
-                            />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-gray-700 text-sm font-bold mb-2">Employee Name *</label>
+                                <input
+                                    type="text"
+                                    placeholder="Full Name"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    className="w-full p-3 rounded border border-gray-300 focus:border-blue-500 focus:outline-none text-black"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-gray-700 text-sm font-bold mb-2">Job Position</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g. Manager, Staff, Driver"
+                                    value={jobPosition}
+                                    onChange={(e) => setJobPosition(e.target.value)}
+                                    className="w-full p-3 rounded border border-gray-300 focus:border-blue-500 focus:outline-none text-black"
+                                />
+                            </div>
                         </div>
 
                         <div>
@@ -214,8 +168,8 @@ export default function RegisterEmployeePage() {
 
                         <button
                             onClick={handleRegister}
-                            disabled={loading || !modelsLoaded || !name}
-                            className={`w-full p-3 rounded font-bold text-white transition-colors ${loading || !modelsLoaded || !name
+                            disabled={loading || !name}
+                            className={`w-full p-3 rounded font-bold text-white transition-colors ${loading || !name
                                 ? 'bg-gray-400 cursor-not-allowed'
                                 : 'bg-blue-600 hover:bg-blue-700'
                                 }`}
@@ -224,7 +178,7 @@ export default function RegisterEmployeePage() {
                         </button>
 
                         {message && (
-                            <div className={`p-3 rounded text-center text-sm ${message.includes('Error') || message.includes('No face') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                            <div className={`p-3 rounded text-center text-sm ${message.includes('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                                 {message}
                             </div>
                         )}
