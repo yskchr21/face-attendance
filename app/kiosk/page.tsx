@@ -50,25 +50,52 @@ export default function KioskPage() {
         return () => clearInterval(interval);
     }, []);
 
-    // Detect break time and auto-switch mode
+    // Smart auto-switch mode based on schedule
     useEffect(() => {
         const now = currentTime;
+        const [wsH, wsM] = settings.workStartTime.split(':').map(Number);
+        const [weH, weM] = settings.workEndTime.split(':').map(Number);
         const [bsH, bsM] = settings.breakStartTime.split(':').map(Number);
         const [beH, beM] = settings.breakEndTime.split(':').map(Number);
 
+        const workStart = new Date(); workStart.setHours(wsH, wsM, 0, 0);
+        const workEnd = new Date(); workEnd.setHours(weH, weM, 0, 0);
         const breakStart = new Date(); breakStart.setHours(bsH, bsM, 0, 0);
         const breakEnd = new Date(); breakEnd.setHours(beH, beM, 0, 0);
 
         const inBreak = now >= breakStart && now < breakEnd;
         setIsBreakTime(inBreak);
 
-        // Auto-switch to break mode during break time
-        if (inBreak && (mode === 'check_in' || mode === 'check_out')) {
-            setMode('break_in');
-        } else if (!inBreak && (mode === 'break_in' || mode === 'break_out')) {
+        // Auto-switch logic based on time of day:
+        // Before work start → check_in
+        // Work start to break start → check_in (morning)
+        // Break start to mid-break → break_out (going out for break)
+        // Mid-break to break end → break_in (coming back from break)
+        // Break end to work end → check_out
+        // After work end → check_out
+
+        const midBreak = new Date(breakStart.getTime() + (breakEnd.getTime() - breakStart.getTime()) / 2);
+
+        if (now < workStart) {
+            // Before work: check_in
             setMode('check_in');
+        } else if (now >= workStart && now < breakStart) {
+            // Morning work hours: check_in
+            setMode('check_in');
+        } else if (now >= breakStart && now < midBreak) {
+            // First half of break: break_out (going out)
+            setMode('break_out');
+        } else if (now >= midBreak && now < breakEnd) {
+            // Second half of break: break_in (coming back)
+            setMode('break_in');
+        } else if (now >= breakEnd && now < workEnd) {
+            // Afternoon work hours: check_out
+            setMode('check_out');
+        } else {
+            // After work end: check_out
+            setMode('check_out');
         }
-    }, [currentTime, settings.breakStartTime, settings.breakEndTime]);
+    }, [currentTime, settings]);
 
     useEffect(() => {
         setMessage(t('position_face'));
