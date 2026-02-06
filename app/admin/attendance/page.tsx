@@ -130,10 +130,17 @@ export default function AttendanceLogsPage() {
 
     const getStatusBadge = (log?: { time: string; status: string; photo_url?: string }) => {
         if (!log) return <span className="text-gray-400">-</span>;
-        const color = log.status === 'late' ? 'bg-red-100 text-red-800' : log.status === 'early_departure' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
+
+        // Determine color based on status
+        let color = 'bg-green-100 text-green-800'; // default: on_time
+        if (log.status === 'late') color = 'bg-red-100 text-red-800';
+        else if (log.status === 'early_departure') color = 'bg-yellow-100 text-yellow-800';
+        else if (log.status === 'break') color = 'bg-blue-100 text-blue-800';
+        else if (log.status === 'overtime') color = 'bg-purple-100 text-purple-800';
+
         if (log.photo_url) {
             return (
-                <button onClick={() => setPreviewPhoto(log.photo_url!)} className={`px-2 py-1 rounded text-xs font-bold ${color} hover:ring-2 ring-blue-500 flex items-center gap-1`}>
+                <button onClick={() => setPreviewPhoto(log.photo_url!)} className={`px-2 py-1 rounded text-xs font-bold ${color} hover:ring-2 ring-blue-500 flex items-center gap-1 mx-auto`}>
                     📷 {log.time}
                 </button>
             );
