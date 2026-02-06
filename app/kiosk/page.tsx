@@ -257,12 +257,36 @@ export default function KioskPage() {
             status = 'break'; // For break_in/break_out
         }
 
-        // Insert log
+        // Capture photo from video
+        let photoUrl = '';
+        if (videoRef.current) {
+            const canvas = document.createElement('canvas');
+            canvas.width = videoRef.current.videoWidth;
+            canvas.height = videoRef.current.videoHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.drawImage(videoRef.current, 0, 0);
+                const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+                if (blob) {
+                    const fileName = `${employee.id}/${mode}_${now.getTime()}.jpg`;
+                    const { error: uploadError } = await supabase.storage
+                        .from('attendance-photos')
+                        .upload(fileName, blob, { contentType: 'image/jpeg', upsert: true });
+                    if (!uploadError) {
+                        const { data: urlData } = supabase.storage.from('attendance-photos').getPublicUrl(fileName);
+                        photoUrl = urlData.publicUrl;
+                    }
+                }
+            }
+        }
+
+        // Insert log with photo
         const { error } = await supabase.from('attendance_logs').insert([{
             employee_id: employee.id,
             timestamp: now.toISOString(),
             status: status,
-            log_type: mode
+            log_type: mode,
+            photo_url: photoUrl
         }]);
 
         if (error) throw error;

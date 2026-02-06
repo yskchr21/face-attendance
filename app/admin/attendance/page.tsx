@@ -20,10 +20,10 @@ interface EmployeeSummary {
 
 interface DayLog {
     date: string;
-    check_in?: { time: string; status: string };
-    break_out?: { time: string; status: string };
-    break_in?: { time: string; status: string };
-    check_out?: { time: string; status: string };
+    check_in?: { time: string; status: string; photo_url?: string };
+    break_out?: { time: string; status: string; photo_url?: string };
+    break_in?: { time: string; status: string; photo_url?: string };
+    check_out?: { time: string; status: string; photo_url?: string };
 }
 
 export default function AttendanceLogsPage() {
@@ -33,6 +33,7 @@ export default function AttendanceLogsPage() {
     const [summaries, setSummaries] = useState<EmployeeSummary[]>([]);
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
     const [employeeLogs, setEmployeeLogs] = useState<DayLog[]>([]);
+    const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
 
     // Period Filter
     const [filterType, setFilterType] = useState<'month' | 'custom'>('month');
@@ -105,7 +106,7 @@ export default function AttendanceLogsPage() {
         if (!range) return;
 
         const { data: logs } = await supabase.from('attendance_logs')
-            .select('log_type, status, timestamp')
+            .select('log_type, status, timestamp, photo_url')
             .eq('employee_id', emp.id)
             .gte('timestamp', range.start)
             .lte('timestamp', range.end)
@@ -118,18 +119,25 @@ export default function AttendanceLogsPage() {
             if (!dayMap.has(day)) dayMap.set(day, { date: day });
             const d = dayMap.get(day)!;
             const time = new Date(log.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-            if (log.log_type === 'check_in') d.check_in = { time, status: log.status };
-            if (log.log_type === 'break_out') d.break_out = { time, status: log.status };
-            if (log.log_type === 'break_in') d.break_in = { time, status: log.status };
-            if (log.log_type === 'check_out') d.check_out = { time, status: log.status };
+            if (log.log_type === 'check_in') d.check_in = { time, status: log.status, photo_url: log.photo_url };
+            if (log.log_type === 'break_out') d.break_out = { time, status: log.status, photo_url: log.photo_url };
+            if (log.log_type === 'break_in') d.break_in = { time, status: log.status, photo_url: log.photo_url };
+            if (log.log_type === 'check_out') d.check_out = { time, status: log.status, photo_url: log.photo_url };
         });
 
         setEmployeeLogs(Array.from(dayMap.values()).sort((a, b) => b.date.localeCompare(a.date)));
     };
 
-    const getStatusBadge = (log?: { time: string; status: string }) => {
+    const getStatusBadge = (log?: { time: string; status: string; photo_url?: string }) => {
         if (!log) return <span className="text-gray-400">-</span>;
         const color = log.status === 'late' ? 'bg-red-100 text-red-800' : log.status === 'early_departure' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
+        if (log.photo_url) {
+            return (
+                <button onClick={() => setPreviewPhoto(log.photo_url!)} className={`px-2 py-1 rounded text-xs font-bold ${color} hover:ring-2 ring-blue-500 flex items-center gap-1`}>
+                    📷 {log.time}
+                </button>
+            );
+        }
         return <span className={`px-2 py-1 rounded text-xs font-bold ${color}`}>{log.time}</span>;
     };
 
@@ -244,6 +252,19 @@ export default function AttendanceLogsPage() {
                         <div className="p-4 border-t bg-gray-50 text-right">
                             <button onClick={() => setSelectedEmployee(null)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded font-bold">Tutup</button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* PHOTO PREVIEW MODAL */}
+            {previewPhoto && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4" onClick={() => setPreviewPhoto(null)}>
+                    <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-gray-800">📸 Foto Absensi</h3>
+                            <button onClick={() => setPreviewPhoto(null)} className="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                        </div>
+                        <img src={previewPhoto} alt="Attendance Photo" className="w-full rounded-lg" />
                     </div>
                 </div>
             )}
