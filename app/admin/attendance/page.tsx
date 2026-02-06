@@ -112,17 +112,19 @@ export default function AttendanceLogsPage() {
             .lte('timestamp', range.end)
             .order('timestamp', { ascending: true });
 
-        // Group by day
+        // Group by day - use local date
         const dayMap = new Map<string, DayLog>();
         logs?.forEach(log => {
-            const day = log.timestamp.slice(0, 10);
+            const logDate = new Date(log.timestamp);
+            const day = logDate.toLocaleDateString('sv-SE'); // YYYY-MM-DD format in local time
             if (!dayMap.has(day)) dayMap.set(day, { date: day });
             const d = dayMap.get(day)!;
-            const time = new Date(log.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-            if (log.log_type === 'check_in') d.check_in = { time, status: log.status, photo_url: log.photo_url };
-            if (log.log_type === 'break_out') d.break_out = { time, status: log.status, photo_url: log.photo_url };
-            if (log.log_type === 'break_in') d.break_in = { time, status: log.status, photo_url: log.photo_url };
-            if (log.log_type === 'check_out') d.check_out = { time, status: log.status, photo_url: log.photo_url };
+            const time = logDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            const logType = log.log_type?.trim();
+            if (logType === 'check_in') d.check_in = { time, status: log.status, photo_url: log.photo_url };
+            else if (logType === 'break_out') d.break_out = { time, status: log.status, photo_url: log.photo_url };
+            else if (logType === 'break_in') d.break_in = { time, status: log.status, photo_url: log.photo_url };
+            else if (logType === 'check_out') d.check_out = { time, status: log.status, photo_url: log.photo_url };
         });
 
         setEmployeeLogs(Array.from(dayMap.values()).sort((a, b) => b.date.localeCompare(a.date)));
