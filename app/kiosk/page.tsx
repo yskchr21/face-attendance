@@ -103,34 +103,42 @@ export default function KioskPage() {
 
     useEffect(() => {
         const loadModels = async () => {
-            const MODEL_URL = '/models';
-            await Promise.all([
-                faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-                faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-            ]);
-            setModelsLoaded(true);
+            try {
+                const MODEL_URL = '/models';
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+                ]);
+                setModelsLoaded(true);
 
-            // Load all settings
-            const { data } = await supabase.from('app_settings').select('*');
-            if (data) {
-                const s = { ...settings };
-                data.forEach(row => {
-                    if (row.key === 'work_start_time') s.workStartTime = row.value;
-                    if (row.key === 'work_end_time') s.workEndTime = row.value;
-                    if (row.key === 'break_start_time') s.breakStartTime = row.value;
-                    if (row.key === 'break_end_time') s.breakEndTime = row.value;
-                    if (row.key === 'late_threshold') s.lateThreshold = parseInt(row.value) || 15;
-                    if (row.key === 'allow_late_checkin') s.allowLateCheckin = row.value === 'true';
-                    if (row.key === 'max_late_minutes') s.maxLateMinutes = parseInt(row.value) || 60;
-                    if (row.key === 'allow_early_checkout') s.allowEarlyCheckout = row.value === 'true';
-                    if (row.key === 'allow_early_breakout') s.allowEarlyBreakout = row.value === 'true';
-                });
-                setSettings(s);
+                // Load all settings
+                const { data, error } = await supabase.from('app_settings').select('*');
+                if (error) console.error("Error loading settings:", error);
+                
+                if (data) {
+                    const s = { ...settings };
+                    data.forEach(row => {
+                        if (row.key === 'work_start_time') s.workStartTime = row.value;
+                        if (row.key === 'work_end_time') s.workEndTime = row.value;
+                        if (row.key === 'break_start_time') s.breakStartTime = row.value;
+                        if (row.key === 'break_end_time') s.breakEndTime = row.value;
+                        if (row.key === 'late_threshold') s.lateThreshold = parseInt(row.value) || 15;
+                        if (row.key === 'allow_late_checkin') s.allowLateCheckin = row.value === 'true';
+                        if (row.key === 'max_late_minutes') s.maxLateMinutes = parseInt(row.value) || 60;
+                        if (row.key === 'allow_early_checkout') s.allowEarlyCheckout = row.value === 'true';
+                        if (row.key === 'allow_early_breakout') s.allowEarlyBreakout = row.value === 'true';
+                    });
+                    setSettings(s);
+                }
+            } catch (err: any) {
+                console.error("Error initializing models:", err);
+                setMessage(`Gagal memuat model AI: ${err.message || 'Error tidak diketahui'}`);
             }
         };
         loadModels();
     }, []);
+
 
     const startVideo = () => {
         navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
