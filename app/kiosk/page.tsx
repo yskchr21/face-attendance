@@ -97,6 +97,8 @@ export default function KioskPage() {
         }
     }, [currentTime, settings]);
 
+    const [initStep, setInitStep] = useState<string>('Memulai inisialisasi...');
+
     useEffect(() => {
         setMessage(t('position_face'));
     }, [t]);
@@ -105,17 +107,24 @@ export default function KioskPage() {
         const loadModels = async () => {
             try {
                 const MODEL_URL = '/models';
-                await Promise.all([
-                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-                ]);
-                setModelsLoaded(true);
 
+                setInitStep('Memuat Tiny Face Detector...');
+                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+
+                setInitStep('Memuat Face Landmark 68...');
+                await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+
+                setInitStep('Memuat Face Recognition...');
+                await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+                setInitStep('Memuat pengaturan aplikasi...');
                 // Load all settings
                 const { data, error } = await supabase.from('app_settings').select('*');
-                if (error) console.error("Error loading settings:", error);
-                
+                if (error) {
+                    console.error("Error loading settings:", error);
+                    setInitStep(`Error pengaturan: ${error.message}`);
+                }
+
                 if (data) {
                     const s = { ...settings };
                     data.forEach(row => {
@@ -131,12 +140,17 @@ export default function KioskPage() {
                     });
                     setSettings(s);
                 }
+
+                setInitStep('Memulai kamera...');
+                setModelsLoaded(true);
             } catch (err: any) {
                 console.error("Error initializing models:", err);
+                setInitStep(`Gagal memuat AI: ${err.message || 'Error tidak diketahui'}`);
                 setMessage(`Gagal memuat model AI: ${err.message || 'Error tidak diketahui'}`);
             }
         };
         loadModels();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
 
@@ -379,7 +393,7 @@ export default function KioskPage() {
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-8 text-center">
                     <h2 className="text-3xl font-bold text-white mb-2 animate-pulse">{message}</h2>
                     <p className="text-gray-300 text-sm">
-                        {!modelsLoaded ? t('initializing') : currentTime.toLocaleTimeString(language === 'id' ? 'id-ID' : 'en-US')}
+                        {!modelsLoaded ? initStep : currentTime.toLocaleTimeString(language === 'id' ? 'id-ID' : 'en-US')}
                     </p>
                 </div>
             </div>
