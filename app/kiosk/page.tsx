@@ -154,16 +154,37 @@ export default function KioskPage() {
     }, []);
 
 
-    const startVideo = () => {
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
-            .then((stream) => { if (videoRef.current) videoRef.current.srcObject = stream; })
-            .catch((err) => console.error(err));
+    const startVideo = async () => {
+        try {
+            setInitStep('Mengakses kamera...');
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Browser tidak mendukung akses kamera (Mungkin karena bukan HTTPS atau browser jadul).');
+            }
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+            }
+            setInitStep(''); // Clear step on success
+        } catch (err: any) {
+            console.error("Camera error:", err);
+            let errMsg = err.message || 'Error tidak diketahui';
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                errMsg = 'Izin kamera ditolak. Silakan izinkan akses kamera di browser.';
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                errMsg = 'Kamera tidak ditemukan. Pastikan kamera terpasang dan tidak digunakan aplikasi lain.';
+            } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                errMsg = 'Kamera sedang digunakan oleh aplikasi lain.';
+            }
+            setInitStep(`Gagal mengakses kamera: ${errMsg}`);
+            setMessage(`Gagal akses kamera: ${errMsg}`);
+        }
     };
 
     useEffect(() => { if (modelsLoaded) startVideo(); }, [modelsLoaded]);
 
     useEffect(() => {
-        if (!modelsLoaded || isProcessing) return;
+        if (!modelsLoaded || isProcessing || initStep !== '') return;
 
         const interval = setInterval(async () => {
             if (videoRef.current) {
