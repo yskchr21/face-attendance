@@ -190,7 +190,8 @@ export default function KioskPage() {
         const interval = setInterval(async () => {
             if (videoRef.current) {
                 try {
-                    const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+                    // Tingkatkan scoreThreshold agar hanya wajah yang sangat jelas yang dideteksi
+                    const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.7 }))
                         .withFaceLandmarks().withFaceDescriptor();
 
                     if (detection) {
@@ -224,7 +225,9 @@ export default function KioskPage() {
             }
 
             let bestMatch: any = null;
-            let minDistance = 0.55; // Lower distance = stricter face matching (faceapi euclidean distance)
+            // Turunkan minDistance (semakin kecil semakin ketat/mirip)
+            // 0.55 masih cukup longgar. 0.45 atau 0.4 lebih ketat.
+            let minDistance = 0.45;
 
             for (const emp of employees) {
                 if (!emp.face_descriptor || emp.face_descriptor.length === 0) continue;
