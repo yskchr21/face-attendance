@@ -184,8 +184,9 @@ export default function EmployeeManagement() {
             setScanMessage('✅ Face registered successfully!');
             setTimeout(() => { closeScanModal(); fetchEmployees(); }, 1500);
 
-        } catch (error: any) {
-            setScanMessage('❌ Error: ' + error.message);
+        } catch (error: unknown) {
+            const err = error as Error;
+            setScanMessage('❌ Error: ' + err.message);
         }
     };
 
@@ -200,10 +201,30 @@ export default function EmployeeManagement() {
             const ktpUrl = supabase.storage.from('ktp').getPublicUrl(fileName).data.publicUrl;
             await supabase.from('employees').update({ ktp_url: ktpUrl }).eq('id', empId);
             fetchEmployees();
-        } catch (error: any) {
-            alert('Upload failed: ' + error.message);
+        } catch (error: unknown) {
+            const err = error as Error;
+            alert('Upload failed: ' + err.message);
         } finally {
             setUploadingKtpId(null);
+        }
+    };
+
+    const handleDeleteEmployee = async (empId: string, empName: string) => {
+        if (role !== 'superadmin') {
+            alert('Akses Ditolak: Hanya Superadmin yang dapat menghapus karyawan.');
+            return;
+        }
+
+        if (window.confirm(`PERINGATAN: Apakah Anda yakin ingin MENGHAPUS PERMANEN karyawan "${empName}"? Semua data absensi terkait karyawan ini juga akan terhapus.\n\nTindakan ini tidak dapat dibatalkan.`)) {
+            try {
+                const { error } = await supabase.from('employees').delete().eq('id', empId);
+                if (error) throw error;
+                fetchEmployees();
+            } catch (error: unknown) {
+                const err = error as Error;
+                console.error("Gagal menghapus karyawan:", err);
+                alert(`Gagal menghapus karyawan: ${err.message}`);
+            }
         }
     };
 
@@ -325,7 +346,13 @@ export default function EmployeeManagement() {
                                     {/* KTP */}
                                     <td className="p-4">
                                         {emp.ktp_url ? (
-                                            <a href={emp.ktp_url} target="_blank" rel="noopener" className="text-blue-600 text-xs hover:underline">📄 View KTP</a>
+                                            <div className="flex flex-col space-y-1">
+                                                <a href={emp.ktp_url} target="_blank" rel="noopener" className="text-blue-600 text-xs hover:underline">📄 View KTP</a>
+                                                <label className="cursor-pointer text-gray-500 text-xs hover:text-gray-700 hover:underline">
+                                                    {uploadingKtpId === emp.id ? 'Uploading...' : '✏️ Edit KTP'}
+                                                    <input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && handleKtpUpload(emp.id, e.target.files[0])} />
+                                                </label>
+                                            </div>
                                         ) : (
                                             <label className="cursor-pointer text-blue-600 text-xs hover:underline">
                                                 {uploadingKtpId === emp.id ? 'Uploading...' : '📤 Upload KTP'}
@@ -342,10 +369,13 @@ export default function EmployeeManagement() {
                                                 <button onClick={() => setEditingId(null)} className="text-gray-500 hover:text-gray-700">Cancel</button>
                                             </>
                                         ) : (
-                                            <>
-                                                <button onClick={() => openScanModal(emp.id)} className="text-purple-600 hover:text-purple-800 font-medium">📷 Scan</button>
-                                                <button onClick={() => startEdit(emp)} className="text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                                            </>
+                                            <div className="flex items-center justify-end space-x-3">
+                                                <button onClick={() => openScanModal(emp.id)} className="text-purple-600 hover:text-purple-800 font-medium" title="Scan Wajah">📷</button>
+                                                <button onClick={() => startEdit(emp)} className="text-blue-600 hover:text-blue-800 font-medium" title="Edit Data">✏️</button>
+                                                {role === 'superadmin' && (
+                                                    <button onClick={() => handleDeleteEmployee(emp.id, emp.name)} className="text-red-600 hover:text-red-800 font-medium" title="Hapus Permanen">🗑️</button>
+                                                )}
+                                            </div>
                                         )}
                                     </td>
                                 </tr>
