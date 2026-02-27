@@ -186,16 +186,30 @@ export default function KioskPage() {
     useEffect(() => {
         if (!modelsLoaded || isProcessing || initStep !== '') return;
 
+        console.log("Starting detection interval...");
         const interval = setInterval(async () => {
             if (videoRef.current) {
-                const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-                    .withFaceLandmarks().withFaceDescriptor();
-                if (detection) handleFaceDetected(detection.descriptor);
+                try {
+                    const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+                        .withFaceLandmarks().withFaceDescriptor();
+
+                    if (detection) {
+                        console.log("Face detected with score:", detection.detection.score);
+                        handleFaceDetected(detection.descriptor);
+                    } else {
+                        console.log("No face detected in frame.");
+                    }
+                } catch (error) {
+                    console.error("Detection error:", error);
+                }
             }
         }, 2000);
 
-        return () => clearInterval(interval);
-    }, [modelsLoaded, isProcessing, mode]);
+        return () => {
+            console.log("Clearing detection interval");
+            clearInterval(interval);
+        };
+    }, [modelsLoaded, isProcessing, mode, initStep]);
 
     const handleFaceDetected = async (descriptor: Float32Array) => {
         if (isProcessing) return;
@@ -203,28 +217,50 @@ export default function KioskPage() {
         setMessage(t('processing'));
 
         try {
-            const { data: employees } = await supabase.from('employees').select('*').eq('is_active', true);
-            if (!employees) throw new Error('No employees found');
+            const { data: employees } = await supabase.from('employees').select('id, name, face_descriptor').eq('is_active', true);
+            if (!employees || employees.length === 0) {
+                console.error("No active employees found in database.");
+                throw new Error('Tidak ada data karyawan aktif.');
+            }
 
             let bestMatch: any = null;
-            let minDistance = 0.6;
+            let minDistance = 0.55; // Lower distance = stricter face matching (faceapi euclidean distance)
 
             for (const emp of employees) {
                 if (!emp.face_descriptor || emp.face_descriptor.length === 0) continue;
-                const storedDescriptor = typeof emp.face_descriptor === 'string' ? JSON.parse(emp.face_descriptor) : emp.face_descriptor;
-                const distance = faceapi.euclideanDistance(descriptor, storedDescriptor);
-                if (distance < minDistance) { minDistance = distance; bestMatch = emp; }
+                try {
+                    const storedDescriptorData = typeof emp.face_descriptor === 'string' ? JSON.parse(emp.face_descriptor) : emp.face_descriptor;
+                    // Ensure it's converted back to Float32Array
+                    const storedDescriptor = new Float32Array(Object.values(storedDescriptorData));
+                    if (storedDescriptor.length !== 128) {
+                        console.warn(`Invalid descriptor length for ${emp.name}`);
+                        continue;
+                    }
+
+                    const distance = faceapi.euclideanDistance(descriptor, storedDescriptor);
+                    // console.log(`Distance to ${emp.name}: ${distance}`); // Uncomment for extreme debugging
+
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        bestMatch = emp;
+                    }
+                } catch (parseErr) {
+                    console.error(`Error parsing descriptor for ${emp.name}:`, parseErr);
+                }
             }
 
             if (bestMatch) {
+                console.log(`Matched! ${bestMatch.name} (distance: ${minDistance.toFixed(4)})`);
                 await logAttendance(bestMatch);
             } else {
+                console.log(`No match found. Closest distance was ${minDistance.toFixed(4)}`);
                 setMessage(t('face_not_recognized'));
                 setTimeout(() => { setIsProcessing(false); setMessage(t('position_face')); }, 3000);
             }
         } catch (error: any) {
+            console.error("Error matching face:", error);
             setMessage(`Error: ${error.message || 'Unknown error'}`);
-            setIsProcessing(false);
+            setTimeout(() => { setIsProcessing(false); setMessage(t('position_face')); }, 3000);
         }
     };
 
